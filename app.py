@@ -9,6 +9,7 @@ CORS(app)
 # Blueprint 등록
 app.register_blueprint(auth_bp)
 app.register_blueprint(user_bp)
+app.register_blueprint(parking_bp)
 
 @app.route('/hello', methods=['GET'])
 def hello():
