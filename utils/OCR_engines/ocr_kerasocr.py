@@ -55,21 +55,24 @@ class KerasOCRPlate(OCRBase):
         prediction_groups = self.pipeline.recognize([prep])
         results = prediction_groups[0]  # List of (word, box_coords)
 
-        # 4) 후보 필터링 & 번호판 패턴 매칭
+        # 4) 박스 비율 필터링 (번호판 형태 비슷한 것만 유지)
+        filtered_words = []
         for word, box in results:
-            # 4a) 박스 비율 필터링 (번호판 가로:세로 ≈ 2~6)
             coords = np.array(box)
             w = np.linalg.norm(coords[0] - coords[1])
             h = np.linalg.norm(coords[0] - coords[3])
             if h == 0:
                 continue
             aspect = w / h
-            if not (2.0 < aspect < 6.0):
-                continue
+            if 2.0 < aspect < 6.0:
+                filtered_words.append(word)
 
-            # 4b) 정교화된 정규식: 공백·하이픈 허용
-            match = re.search(r"\b\d{2,3}[가-힣][\s\-]?\d{4}\b", word)
-            if match:
-                return match.group(0).replace(" ", "").replace("-", "")
+        # 5) 단어 병합 후 정규식 적용
+        merged_text = ''.join(filtered_words)
+        print("병합된 OCR 결과:", merged_text)  # 디버깅용
+
+        match = re.search(r"\d{2,3}[가-힣][\s\-]?\d{4}", merged_text)
+        if match:
+            return match.group(0).replace(" ", "").replace("-", "")
 
         return ""

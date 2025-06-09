@@ -30,4 +30,4 @@ if __name__ == "__main__":
     for img_path in image_paths:
         img_bytes = load_image_bytes(img_path)
         plate_text = ocr_engine.recognize_plate(img_bytes)
-        print(f"[{img_path}] → 인식된 번호판: {plate_text}")
+    print(f"[{img_path}] → 인식된 번호판: {plate_text}")    

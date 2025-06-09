@@ -1,28 +1,24 @@
-# utils/ocr_engines/ocr_flutter_tesseract.py
-
 from .ocr_base import OCRBase
 import cv2
 import numpy as np
 import pytesseract
+import string
 
 class FlutterTesseractPlate(OCRBase):
     def __init__(self):
-        # Flutter용 Tesseract는 보통 모바일 환경에서 쓰지만,
-        # Python 테스트용으로 동일한 pytesseract를 사용할 수 있습니다.
-        # 만약 실제 Flutter 환경에서 테스트하려면 안드로이드/iOS 쪽 샘플 코드가 필요합니다.
-        pass
-
+        super().__init__()
+        
     def recognize_plate(self, image_bytes: bytes) -> str:
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             return ""
-
+        
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edged = cv2.Canny(blurred, 50, 200)
-
-        contours, _ = cv2.findContours(edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        
+        contours, _= cv2.findContours(edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         contours = sorted(contours, key=cv2.contourArea, reverse=True)[:20]
         plate_contour = None
         for cnt in contours:
@@ -33,6 +29,7 @@ class FlutterTesseractPlate(OCRBase):
                 break
         if plate_contour is None:
             return ""
+        
 
         def _order_points(pts):
             rect = np.zeros((4, 2), dtype="float32")
@@ -43,7 +40,8 @@ class FlutterTesseractPlate(OCRBase):
             rect[1] = pts[np.argmin(diff)]
             rect[3] = pts[np.argmax(diff)]
             return rect
-
+        
+         # 투시 변환 준비
         pts = plate_contour.reshape(4, 2)
         rect = _order_points(pts)
         (tl, tr, br, bl) = rect
@@ -59,8 +57,23 @@ class FlutterTesseractPlate(OCRBase):
                         [0, maxHeight - 1]], dtype="float32")
         M = cv2.getPerspectiveTransform(rect, dst)
         plate_img = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
-
-        config = "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789가-힣"
-        raw_text = pytesseract.image_to_string(plate_img, config=config)
+        
+         # 문자 화이트리스트: 숫자, 한글, 영문 대문자
+        whitelist = "0123456789" + "가-힣" + string.ascii_uppercase
+        config = (
+            "--oem 1 "      # LSTM 엔진 사용
+            "--psm 7 "      # 단일 텍스트 라인
+            f"-c tessedit_char_whitelist={whitelist}"
+        )
+        
+        # 한글+영문 혼합 언어로 OCR 수행
+        raw_text = pytesseract.image_to_string(
+            plate_img,
+            lang="kor+eng",
+            config=config
+        )
+        
+        # 필요 없는 문자 필터링
         recognized = "".join(ch for ch in raw_text if ch.isalnum() or ('가' <= ch <= '힣'))
         return recognized.strip()
+    

@@ -1,9 +1,10 @@
 import time
 import glob
 
-from utils.OCR_engines.ocr_easyocr import EasyOCRPlate
-from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
-from utils.OCR_engines.ocr_kerasocr import KerasOCRPlate
+#from utils.OCR_engines.ocr_easyocr import EasyOCRPlate
+#from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
+#from utils.OCR_engines.ocr_kerasocr import KerasOCRPlate
+from utils.OCR_engines.ocr_Aflutter_tesseract import FlutterTesseractPlate
 
 
 def load_image_bytes(path):
@@ -30,14 +31,16 @@ def main():
     image_bytes_list = [load_image_bytes(p) for p in image_paths]
 
     # 2) OCR 엔진 인스턴스 생성
-    easyocr_engine = EasyOCRPlate()
-    google_engine = GoogleVisionPlate(api_key="AIzaSyCxKXybbsSzNCESi3QKxVGRUuRR9Ir9n1c")
-    kerasocr_engine = KerasOCRPlate()
-
+    #easyocr_engine = EasyOCRPlate()
+    #google_engine = GoogleVisionPlate(api_key="AIzaSyCxKXybbsSzNCESi3QKxVGRUuRR9Ir9n1c")
+    #kerasocr_engine = KerasOCRPlate()
+    flutter_engin = FlutterTesseractPlate()
+    
     engines = [
-        ("EasyOCR", easyocr_engine),
-        ("GoogleVision", google_engine),
-        ("KerasOCR", kerasocr_engine),
+        #("EasyOCR", easyocr_engine),
+        #("GoogleVision", google_engine),
+        #("KerasOCR", kerasocr_engine),
+        ("FlutterTesseract", flutter_engin)
     ]
 
     # 3) 속도 측정 및 결과 출력
