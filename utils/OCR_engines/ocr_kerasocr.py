@@ -7,6 +7,15 @@ import numpy as np
 import cv2
 import re
 
+
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(f"GPU 메모리 설정 중 오류 발생: {e}")
+
 # Monkey-patch Keras Dense to accept and safely ignore `weights` keyword
 from tensorflow.keras.layers import Dense as _Dense
 class Dense(_Dense):
