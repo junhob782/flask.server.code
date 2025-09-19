@@ -1,0 +1,1 @@
+from .routes import bp as notices_bp

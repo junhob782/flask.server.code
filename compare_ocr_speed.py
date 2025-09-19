@@ -1,9 +1,11 @@
 import time
 import glob
+import os
 from flask import Flask, request, jsonify
-from utils.OCR_engines.ocr_easyocr import EasyOCRPlate
-from utils.OCR_engines.ocr_kerasocr import KerasOCRPlate
-from utils.OCR_engines.ocr_Aflutter_tesseract import FlutterTesseractPlate
+#from utils.OCR_engines.ocr_easyocr import EasyOCRPlate
+#from utils.OCR_engines.ocr_kerasocr import KerasOCRPlate
+#from utils.OCR_engines.ocr_Aflutter_tesseract import FlutterTesseractPlate
+from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
 
 # =======================
 # 🔹 OCR 테스트용 함수들
@@ -31,15 +33,29 @@ def run_ocr_speed_test():
     image_bytes_list = [load_image_bytes(p) for p in image_paths]
 
     # OCR 엔진 인스턴스 생성
-    easyocr_engine      = EasyOCRPlate()
-    kerascrnn_engine    = KerasOCRPlate()
-    tesseract_engine    = FlutterTesseractPlate()
+    #easyocr_engine      = EasyOCRPlate()
+    #kerascrnn_engine    = KerasOCRPlate()
+    #tesseract_engine    = FlutterTesseractPlate()
+    
 
     engines = [
-        ("EasyOCR",       easyocr_engine),
-        ("KerasOCR",      kerascrnn_engine),
-        ("TesseractOCR",  tesseract_engine),
+        #("EasyOCR",       easyocr_engine),
+        #("KerasOCR",      kerascrnn_engine),
+        #("TesseractOCR",  tesseract_engine),
+        
     ]
+    
+    api_key = os.getenv("GOOGLE_VISION_API_KEY")
+    if not api_key:
+        print("[INFO] GOOGLE_VISION_API_KEY 미설정 → Googlevision 스킵")
+    else:
+        from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
+    
+    # ✅ 환경변수에서 읽은 api_key를 직접 전달
+    googlevision_engine = GoogleVisionPlate(api_key=api_key)
+    
+    engines.append(("Googlevision", googlevision_engine))
+
     
 
     for name, engine in engines:
@@ -54,7 +70,8 @@ def run_ocr_speed_test():
 # =======================
 
 app = Flask(__name__)
-ocr_engine = EasyOCRPlate()  # 현재 OCR 엔진
+#ocr_engine = EasyOCRPlate()  # 현재 OCR 엔진
+ocr_engine = GoogleVisionPlate()
 
 @app.route('/api/ocr/license_plate', methods=['POST'])
 def ocr_license_plate():
@@ -76,4 +93,5 @@ def ocr_license_plate():
 
 if __name__ == "__main__":
     run_ocr_speed_test()        # OCR 속도 테스트 실행
-    # app.run(host='0.0.0.0', port=5000, debug=True)  # 필요 시 서버 실행
+    engines.append(("Googlevision", googlevision_engine))
+    app.run(host="0.0.0.0", port=5000, debug=True)

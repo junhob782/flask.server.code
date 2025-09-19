@@ -1,0 +1,33 @@
+name: parking_empty_mlkit
+description: Parking empty slot detection with Google ML Kit
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"    # ★ Dart 3.9 이상 요구
+  # flutter: ">=3.22.0"    # (선택) 최소 Flutter 버전 제약을 둘 수도 있음. 없어도 무방.
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ML Kit (당신이 쓰는 버전에 맞춰 유지 — 예시)
+  google_mlkit_object_detection: ^0.12.0
+
+  # 파일/권한/이미지 유틸
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
+  image: ^4.5.4
+
+  # FFmpegKit: 한 가지 변형만 사용 (min_gpl/full_gpl/lite_gpl 중 택1)
+  ffmpeg_kit_flutter_min_gpl: ^6.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  # assets:
+  #   - assets/

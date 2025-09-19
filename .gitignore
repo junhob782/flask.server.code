@@ -1,3 +1,49 @@
-.venv311/
+﻿# === Python virtualenvs ===
 .venv/
-#test
+venv/
+ENV/
+env/
+.venv311/
+
+# === Python cache / build artifacts ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.log
+
+# === IDE / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === Flask / uploads (있다면) ===
+instance/
+uploads/
+
+# === Environment secrets ===
+.env
+.env.*.local
+
+# === Large ML model/binary files (Git LFS 권장, 아니면 무시) ===
+*.pt
+*.onnx
+*.weights
+*.tflite
+*.ckpt
+*.pb
+
+# === Project-specific large assets ===
+videos/
+test_images/
+
+# === Node / web (있다면) ===
+node_modules/
+dist/
+build/
