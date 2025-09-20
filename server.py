@@ -21,6 +21,15 @@ except Exception as e:
     print("NOTICES_BP : import FAILED ->", repr(e))
     _probe_bp = None
 
+# 👇 추가: passes 블루프린트 import 진단
+try:
+    from passes import passes_bp as _passes_bp
+    print("PASSES_BP  : imported OK")
+except Exception as e:
+    print("PASSES_BP  : import FAILED ->", repr(e))
+    _passes_bp = None
+# 👆 추가 끝
+
 # 내부 유틸
 from utils.db import close_db
 
@@ -38,7 +47,7 @@ if not api_key:
 
 # Flask 앱
 app = Flask(__name__)
-
+app.config["JSON_AS_ASCII"] = False
 # 업로드 크기 제한(예: 10MB) — 필요시 조정
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
@@ -56,6 +65,14 @@ if _probe_bp is not None:
     print("REGISTER   : notices_bp registered")
 else:
     print("REGISTER   : SKIPPED (notices import failed)")
+
+# 👇 추가: passes 블루프린트 등록
+if '_passes_bp' in globals() and _passes_bp is not None:
+    app.register_blueprint(_passes_bp)
+    print("REGISTER   : passes_bp registered")
+else:
+    print("REGISTER   : SKIPPED (passes import failed)")
+# 👆 추가 끝
 
 print("== URL MAP (before adding debug routes) ==")
 for r in app.url_map.iter_rules():
@@ -91,9 +108,10 @@ db = pymysql.connect(
     user=DB_USER,
     password=DB_PASS,
     database=DB_NAME,
-    cursorclass=pymysql.cursors.DictCursor
+    cursorclass=pymysql.cursors.DictCursor,
+    charset="utf8mb4",   # ← 추가
+    autocommit=False
 )
-
 # ==============================
 # 5) OCR 엔진
 # ==============================

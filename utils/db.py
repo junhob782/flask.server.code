@@ -20,14 +20,15 @@ def get_db():
             password=DB_PASS,
             database=DB_NAME,
             cursorclass=pymysql.cursors.DictCursor,
-            autocommit=False,
+            charset="utf8mb4",     # ← 추가
+            autocommit=False,      # 보통 False 유지
         )
+        # 선택: 안정성을 위해 한 번 더 보정
+        # with g.db.cursor() as cur:
+        #     cur.execute("SET NAMES utf8mb4")
     return g.db
 
 def close_db(e=None):
-    """
-    Flask teardown_appcontext에서 호출되어 요청 종료 시 커넥션을 닫음.
-    """
     db = g.pop("db", None)
     if db is not None:
         db.close()
