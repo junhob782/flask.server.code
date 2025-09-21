@@ -6,15 +6,13 @@ plugins {
 
 android {
     namespace = "com.example.parking_empty_mlkit"
-    compileSdk = 35
-
-    // flutter.gradle이 주입하는 값 사용
+    compileSdk = 35          // 옵션 B → 35
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
         applicationId = "com.example.parking_empty_mlkit"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 35       // 옵션 B → 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -33,5 +31,5 @@ android {
 flutter { source = "../.." }
 
 dependencies {
-    // 필요 시만 추가
+    // 추가 라이브러리 필요 시 여기에 (보통 비움)
 }

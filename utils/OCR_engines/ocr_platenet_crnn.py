@@ -181,3 +181,4 @@ class PlateNetCRNNPlate(OCRBase):
         print("[WARN] Region OCR failed, performing full-image OCR")
         full = cv2.resize(img, (100, 32))
         return self.recognizer.recognize(full)
+    

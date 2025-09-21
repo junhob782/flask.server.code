@@ -184,7 +184,7 @@ def is_plate_active(conn, plate_number: str):
               AND CURDATE() BETWEEN p.start_date AND p.end_date
             ORDER BY p.end_date DESC
             LIMIT 1
-            """,
+            """,    
             (plate_number,),
         )
         row = cur.fetchone()

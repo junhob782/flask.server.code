@@ -31,7 +31,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 SLOT_ROIS: Dict[int, Tuple[Tuple[int, int], Tuple[int, int]]] = {
     1: ((445, 614), (533, 693)),
     2: ((576, 617), (705, 691)),
-    3: ((817, 617), (995, 692)),
+    3: ((767, 617), (995, 692)),
 }
 
 # 점유 판정 파라미터

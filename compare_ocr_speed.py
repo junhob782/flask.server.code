@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 #from utils.OCR_engines.ocr_kerasocr import KerasOCRPlate
 #from utils.OCR_engines.ocr_Aflutter_tesseract import FlutterTesseractPlate
 from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
+from services.car_services import upsert_car_and_get_id
 
 # =======================
 # 🔹 OCR 테스트용 함수들
