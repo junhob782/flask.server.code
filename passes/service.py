@@ -3,6 +3,9 @@ from typing import Any, Dict, Optional
 from datetime import date, timedelta
 from . import dao
 
+# ------------------------
+# 공통 유틸
+# ------------------------
 def _bool(v: Any) -> bool:
     if isinstance(v, bool): return v
     if isinstance(v, (int, float)): return bool(v)
@@ -14,7 +17,9 @@ def _date(d: Any) -> date:
     if isinstance(d, str): return date.fromisoformat(d)
     raise ValueError("invalid date")
 
-# ---------- Plans ----------
+# ------------------------
+# Plans
+# ------------------------
 def parse_plan_create(body: Dict[str, Any]) -> Dict[str, Any]:
     name = (body.get("name") or "").strip()
     description = (body.get("description") or None)
@@ -62,7 +67,9 @@ def update_plan(conn, pid: int, u: Dict[str, Any]) -> bool:
 def delete_plan(conn, pid: int) -> bool:
     return dao.delete_plan(conn, pid)
 
-# ---------- Passes ----------
+# ------------------------
+# Passes
+# ------------------------
 def parse_pass_create(body: Dict[str, Any], plan: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
     user_id = int(body.get("user_id"))
     car_id = body.get("car_id")
@@ -123,3 +130,81 @@ def delete_pass(conn, sid: int) -> bool:
 
 def is_plate_active(conn, plate_number: str):
     return dao.is_plate_active(conn, plate_number)
+
+# ------------------------
+# 결제 + 테스트 구매
+# ------------------------
+def insert_payment(conn, amount: float, method: str, event_id: Optional[int] = None, success: bool = True) -> int:
+    """
+    payment 테이블에 결제 레코드를 만들고 payment_id 반환.
+    event_id 는 테스트에선 None/0 둘 다 허용. (스키마가 NULL 허용인지 확인)
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO payment (event_id, amount, payment_method, success)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (event_id, amount, method, 1 if success else 0),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+def _has_active_overlap(conn, user_id: int, car_id: Optional[int], start: date) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM passes
+            WHERE status = 'active'
+              AND (user_id = %s OR (%s IS NOT NULL AND car_id = %s))
+              AND end_date >= %s
+            LIMIT 1
+            """,
+            (user_id, car_id, car_id, start),
+        )
+        return bool(cur.fetchone())
+
+def test_purchase_with_payment(conn, user_id: int, car_id: Optional[int], plan_id: int,
+                               method: str = "app", auto_renew: bool = False,
+                               start: Optional[date] = None) -> Dict[str, Any]:
+    s = start or date.today()
+
+    plan = dao.get_plan(conn, plan_id)
+    if not plan:
+        raise ValueError("plan not found")
+    if int(plan.get("is_active", 0)) != 1:
+        raise ValueError("plan is inactive")
+
+    if _has_active_overlap(conn, user_id, car_id, s):
+        raise ValueError("already has active pass")
+
+    amount = float(plan["price"])
+    payment_id = insert_payment(conn, amount=amount, method=method, event_id=None, success=True)
+
+    duration_days = int(plan["duration_days"])
+    e = s + timedelta(days=duration_days)  # 필요시 -1일 정책으로 바꿔도 됨
+
+    sid = dao.insert_pass(
+        conn,
+        user_id=user_id,
+        car_id=car_id,
+        plan_id=plan_id,
+        start_date=s,
+        end_date=e,
+        auto_renew=auto_renew,
+        created_by=user_id,
+    )
+
+    return {
+        "payment_id": payment_id,
+        "pass_id": sid,
+        "start_date": s.isoformat(),
+        "end_date": e.isoformat(),
+        "amount": amount,
+        "method": method,
+    }
+
+# routes.py에서 import하는 별칭
+def svc_test_purchase_with_payment(conn, **kwargs):
+    return test_purchase_with_payment(conn, **kwargs)
