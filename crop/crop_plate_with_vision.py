@@ -1,6 +1,6 @@
 # crop_plate_with_vision.py
-import os, sys, glob, argparse, pathlib
-import io
+import os, sys, glob, argparse, pathlib, io, math
+from typing import List, Tuple
 from PIL import Image
 import cv2
 import numpy as np
@@ -8,152 +8,222 @@ import numpy as np
 # === 항상 이 경로로 저장되도록 기본값 고정 ===
 DEFAULT_OUTDIR = r"C:\Users\hanhw\capstonedesign\lotbot_server\test_images\crops"
 
-# --- Google Vision 클라이언트 준비 (API_KEY 우선, 없으면 ADC 사용) ---
+# ---------------- Vision Client ----------------
 def get_vision_client():
     try:
         from google.cloud import vision
         from google.api_core.client_options import ClientOptions
     except Exception as e:
-        print("[ERR] google-cloud-vision 미설치 또는 import 실패:", e, file=sys.stderr)
+        print("[ERR] google-cloud-vision import 실패:", e, file=sys.stderr)
         print("      pip install google-cloud-vision", file=sys.stderr)
         sys.exit(3)
-
     api_key = os.getenv("GOOGLE_VISION_API_KEY")
     if api_key:
         return vision.ImageAnnotatorClient(client_options=ClientOptions(api_key=api_key))
     else:
         return vision.ImageAnnotatorClient()
 
-# 모듈 전역에서 한 번만 생성
 CLIENT = None
 
 def ensure_env():
-    """API 키가 없더라도 ADC가 있으면 동작 가능하므로 안내만."""
-    api_key = os.getenv("GOOGLE_VISION_API_KEY")
-    adc_hint = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not api_key and not adc_hint:
-        print("[WARN] GOOGLE_VISION_API_KEY 미설정. ADC(서비스계정) 사용 시 GOOGLE_APPLICATION_CREDENTIALS 필요.", file=sys.stderr)
+    if not os.getenv("GOOGLE_VISION_API_KEY") and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        print("[WARN] Vision 자격정보가 보이지 않습니다 (API_KEY 또는 ADC 필요)", file=sys.stderr)
 
+# ---------------- I/O helpers ----------------
 def load_image_cv(path):
-    # 한글 경로 대응: PIL 로드 → numpy → BGR
     with open(path, "rb") as f:
         img_bytes = f.read()
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR), img_bytes
 
 def save_crop_cv(img_bgr, out_path):
-    """유니코드 경로에서도 확실히 저장되도록 다단계 폴백."""
     out_dir = os.path.dirname(out_path)
     os.makedirs(out_dir, exist_ok=True)
-
-    # 1) 일반 imwrite 시도
     try:
-        ok = cv2.imwrite(out_path, img_bgr)
-        if ok:
+        if cv2.imwrite(out_path, img_bgr):
             return
     except Exception:
         pass
-
-    # 2) imencode → 파일 직접쓰기
-    ext = os.path.splitext(out_path)[1].lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"):
-        ext = ".jpg"
-        out_path = os.path.splitext(out_path)[0] + ext
-
+    ext = os.path.splitext(out_path)[1].lower() or ".jpg"
     ok, buf = cv2.imencode(ext, img_bgr)
     if ok:
         with open(out_path, "wb") as f:
             f.write(buf.tobytes())
         return
-
-    # 3) 최종 폴백: PIL로 저장
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     Image.fromarray(img_rgb).save(out_path, quality=95)
 
-def detect_plates_with_vision(img_bytes):
-    """Object Localization으로 번호판 후보 박스 반환: [(x1,y1,x2,y2)] normalized."""
+def to_ascii_filename(name: str) -> str:
+    safe = []
+    for ch in name:
+        if ch.isalnum() or ch in "-_":
+            safe.append(ch)
+        else:
+            safe.append("_")
+    return "".join(safe) or "file"
+
+# ---------------- Detection ----------------
+def detect_plate_polys(img_bytes) -> List[List[Tuple[float,float]]]:
+    """
+    Vision Object Localization → 번호판 후보 다각형(정규화 좌표) 리스트 반환
+    각 폴리: [(x,y), ...] in [0..1]
+    """
     global CLIENT
     if CLIENT is None:
         CLIENT = get_vision_client()
-
-    try:
-        from google.cloud import vision
-    except Exception:
-        raise
-
+    from google.cloud import vision
     image = vision.Image(content=img_bytes)
     resp = CLIENT.object_localization(image=image)
     if resp.error.message:
         raise RuntimeError(resp.error.message)
-
-    boxes = []
+    polys = []
     for obj in resp.localized_object_annotations:
         label = (obj.name or "").lower()
-        if any(k in label for k in ["license plate", "number plate", "registration plate", "license-plate"]):
-            xs = [v.x for v in obj.bounding_poly.normalized_vertices]
-            ys = [v.y for v in obj.bounding_poly.normalized_vertices]
-            boxes.append((min(xs), min(ys), max(xs), max(ys)))
-    return boxes
+        if any(k in label for k in ("license plate", "number plate", "registration plate", "license-plate")):
+            pts = [(v.x, v.y) for v in obj.bounding_poly.normalized_vertices]
+            # 보통 4점이지만, 혹시 3점/5점 이상도 들어올 수 있으니 정렬은 아래에서 처리
+            polys.append(pts)
+    return polys
 
-def crop_by_norm_box(img_bgr, norm_box, pad=0.04):
-    h, w = img_bgr.shape[:2]
-    x1, y1, x2, y2 = norm_box
-    x1 -= pad; y1 -= pad; x2 += pad; y2 += pad
-    xi1 = max(int(x1 * w), 0)
-    yi1 = max(int(y1 * h), 0)
-    xi2 = min(int(x2 * w), w)
-    yi2 = min(int(y2 * h), h)
-    if xi2 - xi1 <= 1 or yi2 - yi1 <= 1:
-        return None
-    return img_bgr[yi1:yi2, xi1:xi2]
+# ---------------- Geometry helpers ----------------
+def _order_quad(pts: np.ndarray) -> np.ndarray:
+    """
+    4점(임의 순서) → [tl, tr, br, bl] 로 정렬
+    """
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1).reshape(-1)
+    tl = pts[np.argmin(s)]
+    br = pts[np.argmax(s)]
+    tr = pts[np.argmin(diff)]
+    bl = pts[np.argmax(diff)]
+    return np.array([tl, tr, br, bl], dtype=np.float32)
 
-def to_ascii_filename(name: str) -> str:
-    """한글/특수문자 제거하여 안전한 파일명으로 치환."""
-    safe = []
-    for ch in name:
-        if ch.isalnum():
-            safe.append(ch)
-        elif ch in ('-', '_'):
-            safe.append(ch)
-        else:
-            safe.append('_')
-    return ''.join(safe) or 'file'
+def _poly_to_quad(poly: List[Tuple[float,float]], w: int, h: int) -> np.ndarray:
+    """
+    Vision normalized poly → 이미지 픽셀 좌표 4점 근사
+    - poly가 4점이 아니면, 컨벡스헐→최소사각형으로 보정
+    """
+    pts = np.array([(x*w, y*h) for x,y in poly], dtype=np.float32)
+    if len(pts) < 4:
+        # fallback: 바운딩 박스
+        x1,y1 = np.min(pts, axis=0)
+        x2,y2 = np.max(pts, axis=0)
+        rect = np.array([[x1,y1],[x2,y1],[x2,y2],[x1,y2]], dtype=np.float32)
+        return rect
+    # 컨벡스 헐 → 최소 외접 사각형
+    hull = cv2.convexHull(pts)
+    rect = cv2.minAreaRect(hull)
+    box = cv2.boxPoints(rect)  # 4x2
+    box = _order_quad(box.astype(np.float32))
+    return box
 
+def warp_plate(img: np.ndarray, quad: np.ndarray, scale: float=1.0) -> np.ndarray:
+    """
+    퍼스펙티브로 번호판을 평평한 직사각형으로 펼침
+    """
+    quad = quad.astype(np.float32)
+    tl,tr,br,bl = quad
+    widthA = np.hypot(*(br - bl))
+    widthB = np.hypot(*(tr - tl))
+    heightA = np.hypot(*(tr - br))
+    heightB = np.hypot(*(tl - bl))
+    W = int(max(widthA, widthB) * scale)
+    H = int(max(heightA, heightB) * scale)
+    W = max(60, min(W, img.shape[1]*2))
+    H = max(20, min(H, img.shape[0]*2))
+    dst = np.array([[0,0],[W-1,0],[W-1,H-1],[0,H-1]], dtype=np.float32)
+    M = cv2.getPerspectiveTransform(quad, dst)
+    warped = cv2.warpPerspective(img, M, (W,H), flags=cv2.INTER_CUBIC)
+    return warped
+
+# ---------------- Tight trim (no margins) ----------------
+def _auto_threshold(gray: np.ndarray) -> np.ndarray:
+    # 조명/색상 다양성 대응: 가우시안 블러 후 Otsu
+    blur = cv2.GaussianBlur(gray, (5,5), 0)
+    _, bw = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # 문자 대비를 흰 배경/검은 글자 둘 다 커버하도록 반전 선택
+    # 문자(어두움)가 배경의 다수라면 inverse가 유리
+    white_ratio = (bw == 255).mean()
+    if white_ratio < 0.5:
+        bw = cv2.bitwise_not(bw)
+    return bw
+
+def _trim_box_from_binary(bw: np.ndarray, pad: int=2) -> Tuple[int,int,int,int]:
+    """
+    이진 영상에서 글자 연결성 기준으로 타이트한 바운딩 박스 추출
+    """
+    # morphology로 구멍 메우기
+    h = max(1, bw.shape[0]//50)
+    w = max(1, bw.shape[1]//50)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (w|1, h|1))
+    merged = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    # 가장 큰 컨투어 박스
+    cnts,_ = cv2.findContours(merged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return 0,0,bw.shape[1],bw.shape[0]
+    c = max(cnts, key=cv2.contourArea)
+    x,y,w,h = cv2.boundingRect(c)
+    x = max(x-pad, 0)
+    y = max(y-pad, 0)
+    x2 = min(x+w+pad, bw.shape[1])
+    y2 = min(y+h+pad, bw.shape[0])
+    return x,y,x2,y2
+
+def refine_tight_crop(warped: np.ndarray) -> np.ndarray:
+    """
+    퍼스펙티브 보정된 번호판에서 문자 영역만 타이트하게 트리밍
+    """
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    bw = _auto_threshold(gray)
+    x1,y1,x2,y2 = _trim_box_from_binary(bw, pad=2)
+    if x2-x1 <= 2 or y2-y1 <= 2:
+        return warped
+    tight = warped[y1:y2, x1:x2]
+    return tight
+
+# ---------------- Pipeline ----------------
 def process_one(path, outdir, debug=False, ascii_name=False):
-    # 읽기
-    with open(path, "rb") as f:
-        img_bytes = f.read()
-    img = load_image_cv(path)
+    img, img_bytes = load_image_cv(path)
+    h, w = img.shape[:2]
 
-    # Vision 박스 탐지
-    boxes = detect_plates_with_vision(img_bytes)
+    polys = detect_plate_polys(img_bytes)
     if debug:
-        print(f"[DBG] {path} -> {len(boxes)} boxes")
+        print(f"[DBG] {path} -> {len(polys)} polys")
 
-    if not boxes:
+    if not polys:
         print(f"[MISS] no plate: {path}")
         return False
 
-    # 가장 큰 박스 1개 선택
-    boxes_sorted = sorted(boxes, key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
-    crop = crop_by_norm_box(img, boxes_sorted[0], pad=0.06)
-    if crop is None:
-        print(f"[MISS] bad box: {path}")
-        return False
+    # 가장 큰 폴리곤(영역) 선택
+    areas = []
+    quads = []
+    for poly in polys:
+        quad = _poly_to_quad(poly, w, h)
+        quads.append(quad)
+        area = cv2.contourArea(quad.astype(np.float32))
+        areas.append(area)
+    quad = quads[int(np.argmax(areas))]
+
+    # 1) 원근 보정으로 번호판 평탄화
+    warped = warp_plate(img, quad, scale=1.1)
+
+    # 2) 문자 기준 타이트 트림
+    tight = refine_tight_crop(warped)
 
     # 저장 경로
     stem = pathlib.Path(path).stem
     if ascii_name:
         stem = to_ascii_filename(stem)
-
     out_path = os.path.join(outdir, f"{stem}_plate.jpg")
-    save_crop_cv(crop, out_path)
+    save_crop_cv(tight, out_path)
     print(f"[OK] {path} -> {out_path}")
     return True
 
+# ---------------- CLI ----------------
 def iter_inputs(src):
     p = pathlib.Path(src)
-    if any(ch in src for ch in ["*", "?", "["]):  # glob 패턴
+    if any(ch in src for ch in ["*", "?", "["]):
         yield from glob.glob(src)
     elif p.is_dir():
         for ext in ("*.jpg","*.jpeg","*.png","*.bmp","*.webp"):
@@ -162,21 +232,17 @@ def iter_inputs(src):
         yield src
 
 def main():
-    ap = argparse.ArgumentParser(description="Crop license plate with Google Vision")
+    ap = argparse.ArgumentParser(description="Crop license plate (tight) with Google Vision")
     ap.add_argument("--src", required=True, help="이미지 경로(파일/폴더) 또는 와일드카드(*.jpg)")
-    # --outdir를 선택 인자로 두되, 기본값을 고정 경로로.
     ap.add_argument("--outdir", default=DEFAULT_OUTDIR, help=f"크롭 저장 폴더 (기본: {DEFAULT_OUTDIR})")
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--ascii-name", action="store_true", help="출력 파일명을 ASCII로 치환")
     args = ap.parse_args()
 
     ensure_env()
-
-    # 전역 CLIENT를 미리 생성하여 인증 문제를 일찍 노출
     global CLIENT
     CLIENT = get_vision_client()
 
-    # outdir 정규화 및 미리 생성
     outdir = os.path.normpath(os.path.expandvars(args.outdir))
     os.makedirs(outdir, exist_ok=True)
 
