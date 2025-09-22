@@ -13,29 +13,34 @@ print("CWD        :", os.getcwd())
 print("SERVER_FILE:", __file__)
 print("PYTHON     :", sys.executable)
 
-# notices 블루프린트 import 진단 (여기서는 'from notices import notices_bp' 를 상단에서 직접 하지 않습니다)
+# notices 블루프린트 import 진단
 try:
-    from notices import notices_bp as _probe_bp  # notices/__init__.py 에서 routes.bp 를 re-export 해야 함
+    from notices import notices_bp as _probe_bp  # notices/__init__.py에서 routes.bp 를 re-export 해야 함
     print("NOTICES_BP : imported OK")
 except Exception as e:
     print("NOTICES_BP : import FAILED ->", repr(e))
     _probe_bp = None
 
-# 👇 추가: passes 블루프린트 import 진단
+# passes 블루프린트 import 진단
 try:
     from passes import passes_bp as _passes_bp
     print("PASSES_BP  : imported OK")
 except Exception as e:
     print("PASSES_BP  : import FAILED ->", repr(e))
     _passes_bp = None
-# 👆 추가 끝
 
 # 내부 유틸
 from utils.db import close_db
 
-# OCR 엔진 (중복 import 제거)
+# OCR 엔진
 from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
 from services.car_services import upsert_car_and_get_id  # 파일명/경로 확인
+
+# 주차 서비스 (입차/출차)
+from services.parking_service import (
+    handle_entry as svc_parking_entry,
+    handle_exit as svc_parking_exit,
+)
 
 # ==============================
 # 1) 환경 변수 / 앱 생성
@@ -54,7 +59,7 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 # 요청 종료 시 DB 커넥션 정리
 app.teardown_appcontext(close_db)
 
-# CORS (개발 단계 전역 허용, 배포 시 origins 화이트리스트로 좁히기)
+# CORS (개발 단계 전역 허용; 배포 시 origins 화이트리스트로 좁히기)
 CORS(app)  # CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "https://yourapp.com"]}})
 
 # ==============================
@@ -66,13 +71,11 @@ if _probe_bp is not None:
 else:
     print("REGISTER   : SKIPPED (notices import failed)")
 
-# 👇 추가: passes 블루프린트 등록
 if '_passes_bp' in globals() and _passes_bp is not None:
     app.register_blueprint(_passes_bp)
     print("REGISTER   : passes_bp registered")
 else:
     print("REGISTER   : SKIPPED (passes import failed)")
-# 👆 추가 끝
 
 print("== URL MAP (before adding debug routes) ==")
 for r in app.url_map.iter_rules():
@@ -83,20 +86,16 @@ for r in app.url_map.iter_rules():
 # ==============================
 @app.get("/__routes")
 def __routes():
-    """
-    현재 앱에 등록된 모든 URL Rule 목록을 반환하여 라우트 등록 여부를 즉시 확인.
-    """
+    """현재 앱에 등록된 모든 URL Rule 목록을 반환하여 라우트 등록 여부를 즉시 확인."""
     return jsonify(sorted([str(r) for r in app.url_map.iter_rules()]))
 
 @app.get("/api/notices_probe")
 def notices_probe():
-    """
-    블루프린트 문제가 있을 때도 server.py 자체 라우트가 살아있는지 확인하는 프로브.
-    """
+    """블루프린트 문제가 있을 때도 server.py 자체 라우트가 살아있는지 확인하는 프로브."""
     return jsonify({"ok": True, "msg": "server.py route is alive"})
 
 # ==============================
-# 4) DB 연결 (전역 커넥션 방식; 추후 utils.db.get_db 패턴으로 전환 권장)
+# 4) DB 연결 (전역 커넥션; 회원/로그인 등에서 사용)
 # ==============================
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_USER = os.getenv("DB_USER", "root")
@@ -109,9 +108,10 @@ db = pymysql.connect(
     password=DB_PASS,
     database=DB_NAME,
     cursorclass=pymysql.cursors.DictCursor,
-    charset="utf8mb4",   # ← 추가
+    charset="utf8mb4",
     autocommit=False
 )
+
 # ==============================
 # 5) OCR 엔진
 # ==============================
@@ -121,7 +121,7 @@ def _normalize_plate(s: str) -> str:
     return (s or "").strip().replace(" ", "")
 
 # ---------- OCR 라우트 ----------
-@app.route('/api/ocr/license_plate', methods=['POST'])
+@app.post('/api/ocr/license_plate')
 def ocr_license_plate():
     """
     multipart/form-data 로 'image' 파일과 (선택) user_id를 받음.
@@ -149,17 +149,83 @@ def ocr_license_plate():
         return jsonify({'error': str(e)}), 500
 
 # ==============================
-# 6) 기존 회원/로그인 API
+# 6) 주차 이벤트(입차/출차) 라우트
+#   - services.parking_service 의 handle_entry/handle_exit 호출
+#   - parkingevent/payment 테이블을 사용 (현재 스키마 유지)
 # ==============================
-@app.route('/hello', methods=['GET'])
+@app.post("/api/parking/entry")
+def api_parking_entry():
+    """
+    multipart/form-data:
+      - image: 파일(필수)
+      - allow_duplicate: "1"/"true"/"yes" 면 열린 이벤트 있어도 새로 생성 (기본 False)
+      - gate/source/image_path/crop_path/ocr_confidence: 현재 스키마에 컬럼은 없지만 향후 확장 대비
+    """
+    if 'image' not in request.files:
+        return jsonify({'error': 'Image file is missing'}), 400
+
+    image_bytes = request.files['image'].read()
+    allow_duplicate = str(request.form.get("allow_duplicate", "")).strip().lower() in ("1", "true", "yes")
+
+    try:
+        res = svc_parking_entry(
+            image_bytes,
+            allow_duplicate=allow_duplicate,
+            gate=request.form.get("gate"),
+            source="gate",
+            image_path=None,
+            crop_path=None,
+            ocr_confidence=None
+        )
+        return jsonify({"message": "ok", **res}), 201
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/api/parking/exit")
+def api_parking_exit():
+    """
+    multipart/form-data:
+      - image: 파일(필수)
+      - payment_method: 기본 'card'
+      - payment_success: 기본 true(1)
+      - zero_fee_for_pass: 정기권이면 0원 처리 (기본 true)
+    """
+    if 'image' not in request.files:
+        return jsonify({'error': 'Image file is missing'}), 400
+
+    image_bytes = request.files['image'].read()
+    payment_method = request.form.get("payment_method", "card")
+    payment_success = str(request.form.get("payment_success", "1")).strip().lower() in ("1", "true", "yes")
+    zero_fee_for_pass = str(request.form.get("zero_fee_for_pass", "1")).strip().lower() in ("1", "true", "yes")
+
+    try:
+        res = svc_parking_exit(
+            image_bytes,
+            payment_method=payment_method,
+            payment_success=payment_success,
+            zero_fee_for_pass=zero_fee_for_pass
+        )
+        return jsonify({"message": "ok", **res}), 200
+    except ValueError as ve:
+        # 입차 기록 없음/이미 출차 등
+        return jsonify({"error": str(ve)}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ==============================
+# 7) 기존 회원/로그인 API
+# ==============================
+@app.get('/hello')
 def hello():
     return jsonify({"message": "Hello from lotbotserver!!"})
 
-@app.route('/')
+@app.get('/')
 def index():
     return jsonify({"message": "Welcome to the Flask API"})
 
-@app.route('/register', methods=['POST'])
+@app.post('/register')
 def register():
     data = request.get_json(silent=True) or {}
     username = data.get('username')
@@ -186,7 +252,7 @@ def register():
         db.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/login', methods=['POST'])
+@app.post('/login')
 def login():
     data = request.get_json(silent=True) or {}
     username = data.get('username')
@@ -211,7 +277,7 @@ def login():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/user/<username>', methods=['GET'])
+@app.get('/user/<username>')
 def get_user(username):
     try:
         db.ping(reconnect=True)
@@ -230,10 +296,9 @@ def get_user(username):
         return jsonify({'error': str(e)}), 500
 
 # ==============================
-# 7) 메인
+# 8) 메인
 # ==============================
 if __name__ == '__main__':
-    # URL 맵을 한 번 더 찍어도 됨(선택)
     print("== FINAL URL MAP ==")
     for r in app.url_map.iter_rules():
         print(r)
