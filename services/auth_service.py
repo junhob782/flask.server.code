@@ -1,5 +1,5 @@
 from flask import jsonify
-from db.connection import get_db
+from DB.connection import get_db
 from werkzeug.security import generate_password_hash, check_password_hash
 
 def register_user(data):

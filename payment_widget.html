@@ -1,0 +1,20 @@
+<button id="pay-button">결제하기</button>
+
+<script src="https://js.tosspayments.com/v1"></script>
+<script>
+    const clientKey = "test_ck_P9BRQmyarY2kp0DvmEDp8J07KzLN"; // 테스트 클라이언트 키
+
+    document.getElementById("pay-button").addEventListener("click", function () {
+        const tossPayments = TossPayments(clientKey);
+
+        tossPayments.requestPayment('카드', {
+            amount: 123000, // 결제 금액
+            orderId: `order-${Date.now()}`, // 고유 주문번호
+            orderName: '테스트 상품123123', // 상품 이름
+            successUrl: 'http://localhost:5000/success', // 성공 시 리다이렉트 URL
+            failUrl: 'http://localhost:5000/fail', // 실패 시 리다이렉트 URL
+        }).catch(function (error) {
+            console.error(error);
+        });
+    });
+</script>
