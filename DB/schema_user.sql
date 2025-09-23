@@ -9,9 +9,13 @@ CREATE TABLE IF NOT EXISTS user (
     email VARCHAR(100) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     car_number VARCHAR(20) NOT NULL UNIQUE,
+    user_role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
+    user_type ENUM('non_member', 'member_regular', 'member_subscriber') NOT NULL DEFAULT 'member_regular',
+    membership_start_date DATE NULL,
+    membership_end_date DATE NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- 전화번호 숫자 길이 제한 (예: 10~11자리)
     CONSTRAINT chk_phone CHECK (LENGTH(phone_number) BETWEEN 10 AND 11),
-    -- 차량번호 형식 제한 (예시: 최소 5자리 이상)
+    -- 차량번호 형식 제한 (예: 최소 5자리 이상)
     CONSTRAINT chk_car_number CHECK (CHAR_LENGTH(car_number) >= 5)
 );

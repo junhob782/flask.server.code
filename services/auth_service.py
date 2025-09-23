@@ -52,6 +52,12 @@ def register_user(data):
     hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     db = get_db()
 
+    # 기본값 설정
+    user_role = "user"
+    user_type = "member_regular"
+    membership_start_date = None
+    membership_end_date = None
+
     try:
         with db.cursor() as cursor:
             cursor.execute("SELECT user_id FROM user WHERE email=%s", (email,))
@@ -60,9 +66,22 @@ def register_user(data):
 
             cursor.execute("""
                 INSERT INTO user 
-                (marketing_opt_in, name, birth_date, phone_number, email, password_hash, car_number)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (marketing_opt_in, name, datetime.strptime(birth_date, "%Y%m%d"), phone, email, hashed_pw, car_number))
+                (marketing_opt_in, name, birth_date, phone_number, email, password_hash, car_number,
+                 user_role, user_type, membership_start_date, membership_end_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                marketing_opt_in, 
+                name, 
+                datetime.strptime(birth_date, "%Y%m%d"), 
+                phone, 
+                email, 
+                hashed_pw, 
+                car_number,
+                user_role,
+                user_type,
+                membership_start_date,
+                membership_end_date
+            ))
             db.commit()
         return {"message": "회원가입 완료"}, 201
     except Exception as e:
