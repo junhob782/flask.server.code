@@ -34,6 +34,20 @@ def get_db():
                     cursor.execute(stmt)
             conn.commit()
 
+    with conn.cursor() as cursor:
+        cursor.execute("SHOW TABLES LIKE 'membership_user'")
+        result = cursor.fetchone()
+        if not result:
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema_MembershipUser.sql')
+            with open(schema_path, 'r', encoding='utf8') as f:
+                schema_sql = f.read()
+            for statement in schema_sql.split(';'):
+                stmt = statement.strip()
+                if stmt:
+                    cursor.execute(stmt)
+            conn.commit()
+
+
     # email_verification 테이블 생성 확인
     with conn.cursor() as cursor:
         cursor.execute("SHOW TABLES LIKE 'email_verification'")

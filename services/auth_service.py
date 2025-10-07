@@ -23,15 +23,46 @@ def get_user(user_id):
     db = get_db()
     try:
         with db.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute("SELECT user_id, name, birth_date, phone_number, email, car_number, marketing_opt_in FROM user WHERE user_id=%s", (user_id,))
+            # 1) user 기본 정보 조회
+            cursor.execute("""
+                SELECT user_id, name, birth_date, phone_number, email, car_number, subscribe_membership, marketing_opt_in
+                FROM user
+                WHERE user_id=%s
+            """, (user_id,))
             user = cursor.fetchone()
             if not user:
                 return {"error": "사용자 없음"}, 404
-            
-            # 날짜를 문자열로 포맷
+
+            # 2) membership_user에서 해당 유저의 최신(종료일 기준) 멤버십 한 건 조회
+            cursor.execute("""
+                SELECT membership_start, membership_end
+                FROM membership_user
+                WHERE user_id=%s
+                ORDER BY membership_end DESC
+                LIMIT 1
+            """, (user_id,))
+            membership = cursor.fetchone()
+
+            # 3) 날짜 포맷 처리 (있으면 문자열로)
             if user.get("birth_date"):
+                # birth_date는 DATE 타입이라면 date 객체일 것
                 user["birth_date"] = user["birth_date"].strftime("%Y-%m-%d")
-            
+
+            if membership:
+                # membership_start / membership_end 도 DATE 타입이라면 포맷
+                if membership.get("membership_start"):
+                    user["membership_start"] = membership["membership_start"].strftime("%Y-%m-%d")
+                else:
+                    user["membership_start"] = None
+
+                if membership.get("membership_end"):
+                    user["membership_end"] = membership["membership_end"].strftime("%Y-%m-%d")
+                else:
+                    user["membership_end"] = None
+            else:
+                user["membership_start"] = None
+                user["membership_end"] = None
+
             return {"user": user}, 200
     except Exception as e:
         return {"error": str(e)}, 500
@@ -54,9 +85,8 @@ def register_user(data):
 
     # 기본값 설정
     user_role = "user"
-    user_type = "member_regular"
-    membership_start_date = None
-    membership_end_date = None
+    subscribe_membership = False  # 이전 user_type → 이제 멤버십 여부를 나타내는 불린
+    kakao_auth = False            # 카카오 연동 여부
 
     try:
         with db.cursor() as cursor:
@@ -67,8 +97,8 @@ def register_user(data):
             cursor.execute("""
                 INSERT INTO user 
                 (marketing_opt_in, name, birth_date, phone_number, email, password_hash, car_number,
-                 user_role, user_type, membership_start_date, membership_end_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                user_role, subscribe_membership, kakao_auth)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 marketing_opt_in, 
                 name, 
@@ -78,9 +108,8 @@ def register_user(data):
                 hashed_pw, 
                 car_number,
                 user_role,
-                user_type,
-                membership_start_date,
-                membership_end_date
+                subscribe_membership,
+                kakao_auth,
             ))
             db.commit()
         return {"message": "회원가입 완료"}, 201

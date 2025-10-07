@@ -12,7 +12,7 @@ def parse_args():
     p.add_argument("--video", type=str, default=None,
                    help="비디오 파일 경로 (미지정 시 폴더에서 첫 영상 자동 탐색)")
     p.add_argument("--folder", type=str,
-                   default=r"C:\Users\hanhw\capstonedesign\lotbot_server\videos\2.mp4",
+                   default=r"/Users/sagagteog/desktop/parkinglot_example.mp4",
                    help="비디오가 있는 폴더 경로")
     p.add_argument("--mode", type=str, choices=["point", "roi"], default="roi",
                    help="point=좌표 찍기, roi=사각형(두 점) 지정")

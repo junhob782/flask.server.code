@@ -10,9 +10,8 @@ CREATE TABLE IF NOT EXISTS user (
     password_hash VARCHAR(255) NOT NULL,
     car_number VARCHAR(20) NOT NULL UNIQUE,
     user_role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
-    user_type ENUM('non_member', 'member_regular', 'member_subscriber') NOT NULL DEFAULT 'member_regular',
-    membership_start_date DATE NULL,
-    membership_end_date DATE NULL,
+    subscribe_membership BOOLEAN NOT NULL DEFAULT FALSE,
+    kakao_auth BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- 전화번호 숫자 길이 제한 (예: 10~11자리)
     CONSTRAINT chk_phone CHECK (LENGTH(phone_number) BETWEEN 10 AND 11),

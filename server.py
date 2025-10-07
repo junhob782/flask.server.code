@@ -51,9 +51,6 @@ from services.parking_service import (
     handle_exit as svc_parking_exit,
 )
 
-# 결제 서비스
-from services.payment_service import confirm_payment as svc_confirm_payment
-
 # ==============================
 # 1) 환경 변수 / 앱 생성
 # ==============================
@@ -182,36 +179,6 @@ def api_parking_exit():
         return jsonify({"error": str(ve)}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# ==============================
-# 6) 결제 승인 라우트
-# ==============================
-def confirm_payment(payment_key, order_id, amount):
-    key = TOSS_SECRET_KEY + ":"
-    encoded_key = base64.b64encode(key.encode("utf-8")).decode("utf-8")
-    headers = {
-        "Authorization": f"Basic {encoded_key}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "paymentKey": payment_key,
-        "orderId": order_id,
-        "amount": amount
-    }
-    response = requests.post(TOSS_CONFIRM_URL, json=data, headers=headers)
-    response.raise_for_status()
-    return response.json()
-
-@app.route('/success', methods=['GET'])
-def success():
-    payment_key = request.args.get('paymentKey')
-    order_id = request.args.get('orderId')
-    amount = request.args.get('amount')
-    try:
-        result = confirm_payment(payment_key, order_id, amount)
-        return f"결제 승인 성공! {result}"
-    except Exception as e:
-        return f"결제 승인 실패: {e}"
 
 # ==============================
 # 7) 디버그/점검용 라우트 (복귀)

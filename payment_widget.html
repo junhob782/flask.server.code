@@ -11,8 +11,8 @@
             amount: 123000, // 결제 금액
             orderId: `order-${Date.now()}`, // 고유 주문번호
             orderName: '테스트 상품123123', // 상품 이름
-            successUrl: 'http://localhost:5000/success', // 성공 시 리다이렉트 URL
-            failUrl: 'http://localhost:5000/fail', // 실패 시 리다이렉트 URL
+            successUrl: 'http://localhost:3000/success', // 성공 시 리다이렉트 URL
+            failUrl: 'http://localhost:3000/fail', // 실패 시 리다이렉트 URL
         }).catch(function (error) {
             console.error(error);
         });
