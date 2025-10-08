@@ -3,12 +3,10 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os, sys
 import pymysql
-import requests
 from dotenv import load_dotenv
-import base64
 
 # ==============================
-# 0) 스타트업 진단 로그
+# 스타트업 진단 로그
 # ==============================
 print("=== STARTUP DIAG ===")
 print("CWD        :", os.getcwd())
@@ -32,27 +30,21 @@ except Exception as e:
     print("PASSES_BP  : import FAILED ->", repr(e))
     _passes_bp = None
 
-# 새 블루프린트
 from routes.auth_routes import auth_bp
 from routes.user_routes import user_bp
 from routes.payment_route import payment_bp
 from routes.parking_routes import bp as parking_bp
 
-# 내부 유틸
 from utils.db import close_db
-
-# OCR 엔진
 from utils.OCR_engines.ocr_googlevision import GoogleVisionPlate
 from services.car_services import upsert_car_and_get_id
+from services.parking_service import handle_entry as svc_parking_entry, handle_exit as svc_parking_exit
 
-# 주차 서비스
-from services.parking_service import (
-    handle_entry as svc_parking_entry,
-    handle_exit as svc_parking_exit,
-)
+# ✅ payment_service에서 expire_expired_memberships 가져오기
+from services.payment_service import expire_expired_memberships, run_scheduler_in_background
 
 # ==============================
-# 1) 환경 변수 / 앱 생성
+# 환경 변수 / 앱 생성
 # ==============================
 load_dotenv()
 
@@ -70,26 +62,17 @@ app.teardown_appcontext(close_db)
 CORS(app)
 
 # ==============================
-# 2) 블루프린트 등록
+# 블루프린트 등록
 # ==============================
-if _notices_bp is not None:
-    app.register_blueprint(_notices_bp)
-    print("REGISTER   : notices_bp registered")
-if '_passes_bp' in globals() and _passes_bp is not None:
-    app.register_blueprint(_passes_bp)
-    print("REGISTER   : passes_bp registered")
-
+if _notices_bp: app.register_blueprint(_notices_bp)
+if '_passes_bp' in globals() and _passes_bp: app.register_blueprint(_passes_bp)
 app.register_blueprint(auth_bp)
-print("REGISTER   : auth_bp registered")
 app.register_blueprint(user_bp)
-print("REGISTER   : user_bp registered")
 app.register_blueprint(payment_bp)
-print("REGISTER   : payment_bp registered")
 app.register_blueprint(parking_bp)
-print("REGISTER   : parking_bp registered")
 
 # ==============================
-# 3) DB 연결
+# DB 연결
 # ==============================
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_USER = os.getenv("DB_USER", "root")
@@ -107,10 +90,9 @@ db = pymysql.connect(
 )
 
 # ==============================
-# 4) OCR 엔진
+# OCR 엔진
 # ==============================
 ocr_engine = GoogleVisionPlate(api_key=api_key)
-
 def _normalize_plate(s: str) -> str:
     return (s or "").strip().replace(" ", "")
 
@@ -135,7 +117,7 @@ def ocr_license_plate():
         return jsonify({'error': str(e)}), 500
 
 # ==============================
-# 5) 주차 이벤트 라우트
+# 주차 이벤트 라우트
 # ==============================
 @app.post("/api/parking/entry")
 def api_parking_entry():
@@ -181,31 +163,30 @@ def api_parking_exit():
         return jsonify({"error": str(e)}), 500
 
 # ==============================
-# 7) 디버그/점검용 라우트 (복귀)
+# 디버그/점검용 라우트
 # ==============================
 @app.get("/__routes")
 def __routes():
-    """현재 앱에 등록된 모든 URL Rule 목록을 반환하여 라우트 등록 여부를 즉시 확인."""
     return jsonify(sorted([str(r) for r in app.url_map.iter_rules()]))
 
 @app.get("/api/notices_probe")
 def notices_probe():
-    """블루프린트 문제가 있을 때도 server.py 자체 라우트가 살아있는지 확인하는 프로브."""
     return jsonify({"ok": True, "msg": "server.py route is alive"})
 
 @app.get('/hello')
-def hello():
-    return jsonify({"message": "Hello from lotbotserver!!"})
-
-@app.get('/')
-def index():
-    return jsonify({"message": "Welcome to the Flask API"})
+def hello(): return jsonify({"message": "Hello from lotbotserver!!"})
+@app.get('/') 
+def index(): return jsonify({"message": "Welcome to the Flask API"})
 
 # ==============================
-# 8) 메인
+# 메인
 # ==============================
 if __name__ == '__main__':
     print("== FINAL URL MAP ==")
     for r in app.url_map.iter_rules():
         print(r)
+
+    # 🔥 여기서 payment_service 스케줄러 백그라운드 실행
+    run_scheduler_in_background()
+
     app.run(host='0.0.0.0', port=3000, debug=True)
