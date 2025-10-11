@@ -25,7 +25,7 @@ def get_user(user_id):
         with db.cursor(pymysql.cursors.DictCursor) as cursor:
             # 1) user 기본 정보 조회
             cursor.execute("""
-                SELECT user_id, name, birth_date, phone_number, email, car_number, subscribe_membership, marketing_opt_in
+                SELECT user_id, name, birth_date, phone_number, email, car_number, subscribe_membership, marketing_opt_in, kakao_auth
                 FROM user
                 WHERE user_id=%s
             """, (user_id,))
@@ -86,7 +86,7 @@ def register_user(data):
     # 기본값 설정
     user_role = "user"
     subscribe_membership = False  # 이전 user_type → 이제 멤버십 여부를 나타내는 불린
-    kakao_auth = False            # 카카오 연동 여부
+    kakao_auth = None            # 카카오 연동 여부
 
     try:
         with db.cursor() as cursor:
@@ -141,6 +141,89 @@ def login_user(data):
             }, SECRET_KEY, algorithm="HS256")
 
             return {"message": "로그인 성공", "token": token}, 200
+
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+def link_kakao_account(user_id, kakao_id):
+    """
+    user_id 기준으로 kakao_auth 컬럼 업데이트
+    단, kakao_id가 이미 다른 유저에게 등록되어 있으면 중복 방지
+    """
+    db = get_db()
+    try:
+        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+            # 1️⃣ 먼저 중복된 kakao_id가 이미 등록돼 있는지 확인
+            cursor.execute("SELECT user_id FROM user WHERE kakao_auth=%s", (kakao_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                if existing["user_id"] == user_id:
+                    # 이미 본인 계정에 연동되어 있음
+                    return {"success": True, "message": "이미 본인 계정에 카카오 연동되어 있습니다."}, 200
+                else:
+                    # 다른 유저가 사용 중인 카카오 ID라면 거부
+                    return {"success": False, "error": "이미 다른 계정에 연동된 카카오 ID입니다."}, 409
+
+            # 2️⃣ 중복이 없을 경우 정상 업데이트
+            cursor.execute("""
+                UPDATE user
+                SET kakao_auth=%s
+                WHERE user_id=%s
+            """, (kakao_id, user_id))
+            db.commit()
+
+        return {"success": True, "message": "카카오 연동 완료"}, 200
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}, 500
+    
+# 카카오 연동 해제
+def unlink_kakao_account(user_id):
+    """
+    user_id 기준으로 DB user 테이블의 kakao_auth 컬럼 NULL로 업데이트
+    """
+    db = get_db()
+    try:
+        with db.cursor() as cursor:
+            cursor.execute("""
+                UPDATE user
+                SET kakao_auth=NULL
+                WHERE user_id=%s
+            """, (user_id,))
+            db.commit()
+        return {"success": True, "message": "카카오 연동 해제 완료"}, 200
+    except Exception as e:
+        return {"success": False, "error": str(e)}, 500
+    
+def login_with_kakao(kakao_id):
+    """
+    1) kakao_id로 로컬 사용자 조회
+    2) 있으면 JWT 발급
+    3) 없으면 오류 반환
+    """
+    db = get_db()
+    try:
+        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT * FROM user WHERE kakao_auth=%s", (kakao_id,))
+            user = cursor.fetchone()
+
+            if not user:
+                return {"error": "연동된 계정이 없습니다."}, 404
+
+            # JWT 발급
+            token = jwt.encode({
+                "user_id": user["user_id"],
+                "exp": datetime.utcnow() + timedelta(hours=6)
+            }, SECRET_KEY, algorithm="HS256")
+
+            return {
+                "message": "로그인 성공",
+                "token": token,
+                "user_id": user["user_id"],
+                "name": user.get("name"),
+                "email": user.get("email")
+            }, 200
 
     except Exception as e:
         return {"error": str(e)}, 500

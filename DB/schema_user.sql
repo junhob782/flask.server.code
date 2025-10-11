@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS user (
     car_number VARCHAR(20) NOT NULL UNIQUE,
     user_role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
     subscribe_membership BOOLEAN NOT NULL DEFAULT FALSE,
-    kakao_auth BOOLEAN NOT NULL DEFAULT FALSE,
+    kakao_auth VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- 전화번호 숫자 길이 제한 (예: 10~11자리)
     CONSTRAINT chk_phone CHECK (LENGTH(phone_number) BETWEEN 10 AND 11),

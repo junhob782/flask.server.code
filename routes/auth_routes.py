@@ -151,3 +151,68 @@ def reset_password():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+# auth_routes.py
+
+@auth_bp.route("/kakao_link", methods=["POST"])
+def kakao_link():
+    """
+    Flutter에서 카카오 로그인 후 사용자 정보를 받아 DB에 kakao_auth 저장
+    """
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        kakao_id = data.get("kakao_id")
+
+        if not user_id or not kakao_id:
+            return jsonify({"error": "user_id 또는 kakao_id 필요"}), 400
+
+        from services.auth_service import link_kakao_account
+        response, status = link_kakao_account(user_id, kakao_id)
+        return jsonify(response), status
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@auth_bp.route("/kakao_unlink", methods=["POST"])
+def kakao_unlink():
+    """
+    Flutter에서 카카오 연동 해제 시 호출
+    """
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+
+        if not user_id:
+            return jsonify({"error": "user_id 필요"}), 400
+
+        from services.auth_service import unlink_kakao_account
+        response, status = unlink_kakao_account(user_id)
+        return jsonify(response), status
+
+    except Exception as e:
+        return jsonify({"error": str(e)}, 500)
+    
+@auth_bp.route("/login/kakao", methods=["POST"])
+def login_kakao():
+    """
+    Flutter에서 카카오 로그인 후 kakao_id를 받아
+    로컬 DB 사용자와 매칭 후 JWT 발급
+    """
+    try:
+        if not request.is_json:
+            return jsonify({"error": "Content-Type must be application/json"}), 415
+
+        data = request.get_json()
+        kakao_id = data.get("kakao_id")
+
+        if not kakao_id:
+            return jsonify({"error": "kakao_id 누락"}), 400
+
+        from services.auth_service import login_with_kakao
+        response, status = login_with_kakao(kakao_id)
+        return jsonify(response), status
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
