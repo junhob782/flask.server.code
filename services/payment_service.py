@@ -4,6 +4,49 @@ import schedule
 import time
 import threading
 
+def get_user_payment_history(user_id, limit=50):
+    """
+    특정 유저의 결제 내역 조회
+    - limit: 최신 limit개 항목만 조회
+    """
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT payment_id, use_date, amount, type, created_at
+            FROM payment_breakdown
+            WHERE user_id = %s
+            ORDER BY use_date DESC, created_at DESC
+            LIMIT %s
+        """, (user_id, limit))
+
+        rows = cursor.fetchall()
+        payments = []
+        for row in rows:
+            if isinstance(row, dict):
+                payments.append({
+                    "payment_id": row["payment_id"],
+                    "use_date": str(row["use_date"]),
+                    "amount": row["amount"],
+                    "type": row["type"],
+                    "created_at": str(row["created_at"])
+                })
+            else:
+                payments.append({
+                    "payment_id": row[0],
+                    "use_date": str(row[1]),
+                    "amount": row[2],
+                    "type": row[3],
+                    "created_at": str(row[4])
+                })
+
+        return payments
+
+    finally:
+        cursor.close()
+        db.close()
+
 def expire_expired_memberships(cursor=None):
     """
     만료된 정기권 자동 해제 (membership_end <= 오늘)
@@ -44,7 +87,6 @@ def expire_expired_memberships(cursor=None):
         db.commit()
         cursor.close()
         db.close()
-
 
 def confirm_subscription_payment(user_id, duration_days):
     db = get_db()
@@ -105,6 +147,15 @@ def confirm_subscription_payment(user_id, duration_days):
                 cursor.execute("UPDATE user SET subscribe_membership = TRUE WHERE user_id = %s", (user_id,))
                 status = "reactivated"
 
+        # -------------------------
+        # 💳 결제 내역 기록
+        # -------------------------
+        amount = int(duration_days) * 1000  # 예시: 하루 1000원, 실제 로직에 맞게 변경
+        cursor.execute("""
+            INSERT INTO payment_breakdown (user_id, use_date, amount, type)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, today, amount, '정기권'))
+
         db.commit()
 
         return {
@@ -119,7 +170,6 @@ def confirm_subscription_payment(user_id, duration_days):
     finally:
         cursor.close()
         db.close()
-
 
 # --------------------------------------------
 # 스케줄러: 매일 자정 자동 만료

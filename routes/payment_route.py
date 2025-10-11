@@ -1,7 +1,16 @@
 from flask import Blueprint, request, jsonify
 from services.payment_service import confirm_subscription_payment
+from services.payment_service import confirm_subscription_payment, get_user_payment_history
 
 payment_bp = Blueprint('payment', __name__, url_prefix="/api/payment")
+
+@payment_bp.route('/history/<int:user_id>', methods=['GET'])
+def get_payment_history(user_id):
+    payments = get_user_payment_history(user_id)
+    return jsonify({
+        "user_id": user_id,
+        "payments": payments
+    })
 
 @payment_bp.route('/subscribe', methods=['POST'])
 def confirm_subscription():

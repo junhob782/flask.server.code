@@ -266,14 +266,25 @@ def update_user(user_id, data):
         return {"error": str(e)}, 500
 
 # 회원 탈퇴
+# 회원 탈퇴 (연관 데이터 포함)
 def delete_user(user_id):
     db = get_db()
     try:
         with db.cursor() as cursor:
+            # 1️⃣ payment_breakdown 삭제
+            cursor.execute("DELETE FROM payment_breakdown WHERE user_id=%s", (user_id,))
+            
+            # 2️⃣ membership_user 삭제
+            cursor.execute("DELETE FROM membership_user WHERE user_id=%s", (user_id,))
+            
+            # 3️⃣ user 삭제
             cursor.execute("DELETE FROM user WHERE user_id=%s", (user_id,))
+            
+            # 커밋
             db.commit()
         return {"message": "회원 탈퇴 완료"}, 200
     except Exception as e:
+        db.rollback()  # 오류 시 롤백
         return {"error": str(e)}, 500
     
 def send_email(to_email, code):
