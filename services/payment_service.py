@@ -171,6 +171,48 @@ def confirm_subscription_payment(user_id, duration_days):
         cursor.close()
         db.close()
 
+def record_leave_payment(user_id, amount):
+    """
+    출차 결제 내역 기록 (회원/비회원 공용)
+    - 회원: user_id 존재
+    - 비회원: user_id=None (NULL로 DB 기록)
+    - type은 '출차'로 고정
+    - use_date = 오늘 날짜
+    """
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        today = datetime.now().date()
+
+        # ✅ user_id가 None일 경우에도 DB에 NULL로 들어가게
+        cursor.execute("""
+            INSERT INTO payment_breakdown (user_id, use_date, amount, type)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, today, amount, '출차'))
+
+        db.commit()
+
+        # 로그용 출력
+        print(f"[INFO] 출차 결제 내역 등록 완료 - user_id={user_id}, amount={amount}, date={today}")
+
+        return {
+            "message": "출차 결제 내역 등록 완료",
+            "user_id": user_id,
+            "amount": amount,
+            "type": "출차",
+            "use_date": str(today)
+        }
+
+    except Exception as e:
+        print(f"[ERROR] 출차 결제 등록 실패: {e}")
+        db.rollback()
+        return {"error": str(e)}
+
+    finally:
+        cursor.close()
+        db.close()
+
 # --------------------------------------------
 # 스케줄러: 매일 자정 자동 만료
 # --------------------------------------------
