@@ -16,19 +16,29 @@ from config import MODEL_NAME, NUM_CLASSES
 
 # 모델 로딩 함수
 def load_parking_model(model_path='ml_models/best_parking_classifier.pth'):
+    import os
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Vision Service: 사용하는 디바이스 -> {device.type}")
     
-    # 빈 모델 구조를 먼저 만듭니다. (학습 때와 동일한 구조)
-    model = timm.create_model(MODEL_NAME, pretrained=False, num_classes=NUM_CLASSES)
+    # 모델 파일이 없으면 None 반환 (테스트 모드)
+    if not os.path.exists(model_path):
+        print(f"Vision Service: 모델 파일 없음 ({model_path}) - 테스트 모드로 실행")
+        return None, device
     
-    # 학습된 가중치(지식)를 불러와 모델에 덮어씌웁니다.
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval() # 추론 모드로 설정 (매우 중요!)
-    
-    print("Vision Service: 주차 공간 분류 모델 로딩 완료.")
-    return model, device
+    try:
+        # 빈 모델 구조를 먼저 만듭니다. (학습 때와 동일한 구조)
+        model = timm.create_model(MODEL_NAME, pretrained=False, num_classes=NUM_CLASSES)
+        
+        # 학습된 가중치(지식)를 불러와 모델에 덮어씌웁니다.
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.to(device)
+        model.eval() # 추론 모드로 설정 (매우 중요!)
+        
+        print("Vision Service: 주차 공간 분류 모델 로딩 완료.")
+        return model, device
+    except Exception as e:
+        print(f"Vision Service: 모델 로딩 실패 - {e}")
+        return None, device
 
 # 이미지 전처리 함수 (학습 때와 100% 동일해야 함)
 def get_preprocess_transform():
@@ -56,6 +66,11 @@ def analyze_parking_slots(cropped_images):
     """
     if not cropped_images:
         return []
+    
+    # 모델이 없으면 더미 결과 반환 (테스트용)
+    if PARKING_MODEL is None:
+        print("Vision Service: 모델 없음 - 더미 결과 반환")
+        return ['empty'] * len(cropped_images)
 
     # 1. 모든 이미지를 AI가 이해할 수 있는 텐서(Tensor)로 변환
     batch = torch.stack([PREPROCESS_TRANSFORM(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)) for img in cropped_images]).to(DEVICE)

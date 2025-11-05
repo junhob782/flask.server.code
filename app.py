@@ -4,7 +4,6 @@ from routes.auth_routes import auth_bp
 from routes.user_routes import user_bp
 from routes.payment_route import payment_bp
 from routes.parking_routes import bp as parking_bp
-from services.payment_service import confirm_payment
 import requests
 import os
 from dotenv import load_dotenv
@@ -16,7 +15,7 @@ CORS(app)
 # Blueprint 등록
 app.register_blueprint(auth_bp)
 app.register_blueprint(user_bp)
-app.register_blueprint(parking_bp)
+app.register_blueprint(parking_bp)  # 원래대로 복원
 app.register_blueprint(payment_bp)
 
 load_dotenv()

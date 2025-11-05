@@ -3,7 +3,7 @@
 import numpy as np
 import cv2
 from flask import Blueprint, request, jsonify
-from services.parking_service import handle_entry, handle_exit
+from services.parking_service import handle_entry, handle_exit, handle_exit_by_plate, get_guest_parking_details
 from utils.response import make_response, error_response
 from utils.validation import validate_image_file
 import logging
@@ -54,8 +54,8 @@ def handle_car_exit():
     plate = data['license_plate']
 
     try:
-        # services 레이어의 표준 handle_exit 함수를 호출합니다.
-        result = handle_exit(license_plate=plate)
+        # services 레이어의 차량번호 기반 출차 함수를 호출합니다.
+        result = handle_exit_by_plate(license_plate=plate)
         return jsonify(result), 200
     except ValueError as e:
         # handle_exit에서 주차 중인 차를 못 찾으면 ValueError가 발생합니다.
@@ -65,7 +65,35 @@ def handle_car_exit():
         logging.exception("Exit Error")
         return jsonify({'error': '서버 내부 오류가 발생했습니다.'}), 500
 
-# --- 조회 관련 API (수정 없음) ---
+# --- 조회 관련 API ---
+def _get_parking_inquiry_response(license_plate):
+    """주차 조회 공통 로직"""
+    if not license_plate:
+        return error_response("차량 번호가 필요합니다.", 400)
+
+    try:
+        result = get_guest_parking_details(license_plate)
+        return make_response(result, 200)
+    except ValueError as e:
+        return error_response(str(e), 404)
+    except Exception as e:
+        logging.exception(f"Error in parking inquiry for plate {license_plate}")
+        return error_response("서버 내부 오류가 발생했습니다.", 500)
+
+@bp.route('/inquire/guest/<string:license_plate>', methods=['GET'])
+def inquire_guest_parking_status(license_plate):
+    """
+    (기존 경로) 차량 번호로 현재 주차 현황을 조회합니다.
+    """
+    return _get_parking_inquiry_response(license_plate)
+
+@bp.route('/api/parking/inquire/guest/<string:license_plate>', methods=['GET'])
+def inquire_guest_parking_status_api(license_plate):
+    """
+    (Flutter 앱 호환 경로) 차량 번호로 현재 주차 현황을 조회합니다.
+    """
+    return _get_parking_inquiry_response(license_plate)
+
 
 @bp.route('/status')
 def get_parking_status():
