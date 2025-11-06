@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 import random
 from dotenv import load_dotenv
 import os
+import bcrypt  # ✅ 위로 올림 (중복 import 제거)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, '..', '.env'))
@@ -23,9 +24,10 @@ def get_user(user_id):
     db = get_db()
     try:
         with db.cursor(pymysql.cursors.DictCursor) as cursor:
-            # 1) user 기본 정보 조회
+            # 1) user 기본 정보 조회 (✅ user_type 포함)
             cursor.execute("""
-                SELECT user_id, name, birth_date, phone_number, email, car_number, subscribe_membership, marketing_opt_in, kakao_auth
+                SELECT user_id, name, birth_date, phone_number, email, car_number,
+                       subscribe_membership, marketing_opt_in, kakao_auth, user_type
                 FROM user
                 WHERE user_id=%s
             """, (user_id,))
@@ -45,20 +47,11 @@ def get_user(user_id):
 
             # 3) 날짜 포맷 처리 (있으면 문자열로)
             if user.get("birth_date"):
-                # birth_date는 DATE 타입이라면 date 객체일 것
                 user["birth_date"] = user["birth_date"].strftime("%Y-%m-%d")
 
             if membership:
-                # membership_start / membership_end 도 DATE 타입이라면 포맷
-                if membership.get("membership_start"):
-                    user["membership_start"] = membership["membership_start"].strftime("%Y-%m-%d")
-                else:
-                    user["membership_start"] = None
-
-                if membership.get("membership_end"):
-                    user["membership_end"] = membership["membership_end"].strftime("%Y-%m-%d")
-                else:
-                    user["membership_end"] = None
+                user["membership_start"] = membership["membership_start"].strftime("%Y-%m-%d") if membership.get("membership_start") else None
+                user["membership_end"]   = membership["membership_end"].strftime("%Y-%m-%d") if membership.get("membership_end") else None
             else:
                 user["membership_start"] = None
                 user["membership_end"] = None
@@ -85,8 +78,12 @@ def register_user(data):
 
     # 기본값 설정
     user_role = "user"
-    subscribe_membership = False  # 이전 user_type → 이제 멤버십 여부를 나타내는 불린
-    kakao_auth = None            # 카카오 연동 여부
+    subscribe_membership = False
+    kakao_auth = None
+
+    # ✅ user_type 기본값: member_regular
+    # 클라이언트로부터 값이 오더라도 없으면 기본값 사용
+    user_type = data.get("user_type") or "member_regular"
 
     try:
         with db.cursor() as cursor:
@@ -94,15 +91,16 @@ def register_user(data):
             if cursor.fetchone():
                 return {"error": "이미 존재하는 이메일"}, 409
 
+            # ✅ INSERT 컬럼에 user_type 포함
             cursor.execute("""
                 INSERT INTO user 
                 (marketing_opt_in, name, birth_date, phone_number, email, password_hash, car_number,
-                user_role, subscribe_membership, kakao_auth)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 user_role, subscribe_membership, kakao_auth, user_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 marketing_opt_in, 
                 name, 
-                datetime.strptime(birth_date, "%Y%m%d"), 
+                datetime.strptime(birth_date, "%Y%m%d") if birth_date else None, 
                 phone, 
                 email, 
                 hashed_pw, 
@@ -110,6 +108,7 @@ def register_user(data):
                 user_role,
                 subscribe_membership,
                 kakao_auth,
+                user_type,  # ✅
             ))
             db.commit()
         return {"message": "회원가입 완료"}, 201
@@ -153,19 +152,17 @@ def link_kakao_account(user_id, kakao_id):
     db = get_db()
     try:
         with db.cursor(pymysql.cursors.DictCursor) as cursor:
-            # 1️⃣ 먼저 중복된 kakao_id가 이미 등록돼 있는지 확인
+            # 1️⃣ 중복된 kakao_id 확인
             cursor.execute("SELECT user_id FROM user WHERE kakao_auth=%s", (kakao_id,))
             existing = cursor.fetchone()
 
             if existing:
                 if existing["user_id"] == user_id:
-                    # 이미 본인 계정에 연동되어 있음
                     return {"success": True, "message": "이미 본인 계정에 카카오 연동되어 있습니다."}, 200
                 else:
-                    # 다른 유저가 사용 중인 카카오 ID라면 거부
                     return {"success": False, "error": "이미 다른 계정에 연동된 카카오 ID입니다."}, 409
 
-            # 2️⃣ 중복이 없을 경우 정상 업데이트
+            # 2️⃣ 업데이트
             cursor.execute("""
                 UPDATE user
                 SET kakao_auth=%s
@@ -180,9 +177,6 @@ def link_kakao_account(user_id, kakao_id):
     
 # 카카오 연동 해제
 def unlink_kakao_account(user_id):
-    """
-    user_id 기준으로 DB user 테이블의 kakao_auth 컬럼 NULL로 업데이트
-    """
     db = get_db()
     try:
         with db.cursor() as cursor:
@@ -211,7 +205,6 @@ def login_with_kakao(kakao_id):
             if not user:
                 return {"error": "연동된 계정이 없습니다."}, 404
 
-            # JWT 발급
             token = jwt.encode({
                 "user_id": user["user_id"],
                 "exp": datetime.utcnow() + timedelta(hours=6)
@@ -238,8 +231,12 @@ def update_user(user_id, data):
     fields = []
     values = []
 
-    for col in ["name", "birth_date", "phone_number", "email", "password", "car_number"]:
-        if data.get(col):
+    # ✅ user_type 업데이트 허용 (화이트리스트 간단 검증)
+    # 필요하면 set으로 더 좁혀도 됨.
+    editable_cols = ["name", "birth_date", "phone_number", "email", "password", "car_number", "user_type"]
+
+    for col in editable_cols:
+        if data.get(col) is not None:
             if col == "password":
                 fields.append("password_hash=%s")
                 hashed_pw = bcrypt.hashpw(data[col].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -247,6 +244,12 @@ def update_user(user_id, data):
             elif col == "birth_date":
                 fields.append("birth_date=%s")
                 values.append(datetime.strptime(data[col], "%Y%m%d"))
+            elif col == "user_type":
+                # 간단 검증 (원하면 구체적 enum 검증)
+                # allowed = {"member_regular", "member_plus", "non_member", "admin", "dealer"}
+                # if data[col] not in allowed: return {"error": "허용되지 않은 user_type"}, 400
+                fields.append("user_type=%s")
+                values.append(data[col])
             else:
                 fields.append(f"{col}=%s")
                 values.append(data[col])
@@ -265,26 +268,18 @@ def update_user(user_id, data):
     except Exception as e:
         return {"error": str(e)}, 500
 
-# 회원 탈퇴
 # 회원 탈퇴 (연관 데이터 포함)
 def delete_user(user_id):
     db = get_db()
     try:
         with db.cursor() as cursor:
-            # 1️⃣ payment_breakdown 삭제
             cursor.execute("DELETE FROM payment_breakdown WHERE user_id=%s", (user_id,))
-            
-            # 2️⃣ membership_user 삭제
             cursor.execute("DELETE FROM membership_user WHERE user_id=%s", (user_id,))
-            
-            # 3️⃣ user 삭제
             cursor.execute("DELETE FROM user WHERE user_id=%s", (user_id,))
-            
-            # 커밋
             db.commit()
         return {"message": "회원 탈퇴 완료"}, 200
     except Exception as e:
-        db.rollback()  # 오류 시 롤백
+        db.rollback()
         return {"error": str(e)}, 500
     
 def send_email(to_email, code):
@@ -346,8 +341,7 @@ def verify_email_code(email, code):
             return {"message": "이메일 인증 완료"}, 200
     except Exception as e:
         return {"error": str(e)}, 500
-    
-# 사용자 존재 여부 확인 (이메일 + 전화번호)
+
 def check_user_exists(email, phone_number):
     db = get_db()
     try:
@@ -360,15 +354,11 @@ def check_user_exists(email, phone_number):
             user = cursor.fetchone()
 
             if user:
-                # 사용자 존재
                 return {"message": "사용자 존재", "user": user}, 200
             else:
-                # 사용자 없음
                 return {"error": "사용자 없음"}, 404
     except Exception as e:
         return {"error": str(e)}, 500
-    
-import bcrypt
 
 def reset_user_password(email, new_password):
     try:

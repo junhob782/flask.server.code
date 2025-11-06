@@ -1,4 +1,3 @@
-# server.py
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os, sys
@@ -43,6 +42,10 @@ from services.parking_service import handle_entry as svc_parking_entry, handle_e
 # ✅ payment_service에서 expire_expired_memberships 가져오기
 from services.payment_service import expire_expired_memberships, run_scheduler_in_background
 
+# ✅ SQLAlchemy 전역 db (models.py)
+from models import db
+from sqlalchemy import text
+
 # ==============================
 # 환경 변수 / 앱 생성
 # ==============================
@@ -62,24 +65,33 @@ app.teardown_appcontext(close_db)
 CORS(app)
 
 # ==============================
-# 블루프린트 등록
-# ==============================
-if _notices_bp: app.register_blueprint(_notices_bp)
-if '_passes_bp' in globals() and _passes_bp: app.register_blueprint(_passes_bp)
-app.register_blueprint(auth_bp)
-app.register_blueprint(user_bp)
-app.register_blueprint(payment_bp)
-app.register_blueprint(parking_bp)
-
-# ==============================
-# DB 연결
+# DB 연결 설정 (SQLAlchemy + PyMySQL 병행)
 # ==============================
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_USER = os.getenv("DB_USER", "root")
 DB_PASS = os.getenv("DB_PASS", "123456")
 DB_NAME = os.getenv("DB_NAME", "lotbotsystem")
 
-db = pymysql.connect(
+# ★ SQLAlchemy 설정 + 바인딩
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}?charset=utf8mb4"
+)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# (개발 편의) 최초 실행 시 연결 점검 (Flask-SQLAlchemy 3.x: bind가 None일 수 있으므로 실제 쿼리로 확인)
+with app.app_context():
+    # 필요 시 최초 생성
+    # db.create_all()
+    try:
+        db.session.execute(text("SELECT 1"))
+        print("[OK] SQLAlchemy connected & app context active")
+    except Exception as e:
+        print("[FATAL] SQLAlchemy connect failed:", repr(e))
+        raise
+
+# (선택) PyMySQL 로우 커넥션 필요 시 유지 (이름 충돌 방지)
+pymysql_conn = pymysql.connect(
     host=DB_HOST,
     user=DB_USER,
     password=DB_PASS,
@@ -90,9 +102,20 @@ db = pymysql.connect(
 )
 
 # ==============================
+# 블루프린트 등록 (prefix 없음 → /status 그대로 사용)
+# ==============================
+if _notices_bp: app.register_blueprint(_notices_bp)
+if '_passes_bp' in globals() and _passes_bp: app.register_blueprint(_passes_bp)
+app.register_blueprint(auth_bp)
+app.register_blueprint(user_bp)
+app.register_blueprint(payment_bp)
+app.register_blueprint(parking_bp)
+
+# ==============================
 # OCR 엔진
 # ==============================
 ocr_engine = GoogleVisionPlate(api_key=api_key)
+
 def _normalize_plate(s: str) -> str:
     return (s or "").strip().replace(" ", "")
 
@@ -117,7 +140,7 @@ def ocr_license_plate():
         return jsonify({'error': str(e)}), 500
 
 # ==============================
-# 주차 이벤트 라우트
+# 주차 이벤트 라우트 (게이트 API)
 # ==============================
 @app.post("/api/parking/entry")
 def api_parking_entry():
@@ -174,9 +197,12 @@ def notices_probe():
     return jsonify({"ok": True, "msg": "server.py route is alive"})
 
 @app.get('/hello')
-def hello(): return jsonify({"message": "Hello from lotbotserver!!"})
-@app.get('/') 
-def index(): return jsonify({"message": "Welcome to the Flask API"})
+def hello():
+    return jsonify({"message": "Hello from lotbotserver!!"})
+
+@app.get('/')
+def index():
+    return jsonify({"message": "Welcome to the Flask API"})
 
 # ==============================
 # 메인
@@ -186,7 +212,7 @@ if __name__ == '__main__':
     for r in app.url_map.iter_rules():
         print(r)
 
-    # 🔥 여기서 payment_service 스케줄러 백그라운드 실행
+    # 🔥 결제 서비스 만료 스케줄러 백그라운드 실행
     run_scheduler_in_background()
 
     app.run(host='0.0.0.0', port=3000, debug=True)

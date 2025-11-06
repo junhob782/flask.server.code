@@ -4,6 +4,7 @@ venv/
 ENV/
 env/
 .venv311/
+ml_models/
 
 # === Python cache / build artifacts ===
 __pycache__/

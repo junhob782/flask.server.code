@@ -1,4 +1,3 @@
-# services/parking_service.py
 from DB.connection import get_db
 from utils.ocr import recognize_plate as default_recognize_plate
 from utils.fee_calc import calculate_fee
@@ -199,15 +198,13 @@ def get_guest_parking_details(license_plate: str):
     now = datetime.datetime.now()
     db = get_db()
     with db.cursor() as cur:
-        # 미출차 이벤트 찾기 (handle_exit의 쿼리 재사용 및 간소화)
+        # 미출차 이벤트 찾기 (라이센스 플레이트로 직접 조회)
         cur.execute("""
             SELECT 
                 e.entry_time,
-                u.user_type
+                'non_member' as user_type
             FROM parkingevent e
-            JOIN car c ON e.car_id = c.car_id
-            LEFT JOIN user u ON c.user_id = u.user_id
-            WHERE c.license_plate = %s AND e.exit_time IS NULL
+            WHERE e.license_plate = %s AND e.exit_time IS NULL
             ORDER BY e.entry_time DESC
             LIMIT 1
         """, (plate,))
